@@ -1,0 +1,117 @@
+---
+title: "Practical Machine Learning Final"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+the goal of the project is to analyze the Weight Lifting Exercises Dataset and build a model that best predicts the "classe" variable.
+
+# Data preparation & Subsetting
+I performed the following steps to clean the dataset:
+1. Removed the null values
+2. Removed columns that contained implicit null values ("#DIV/0!")
+After that, I was left with a relatively clean dataset.
+I also checked the testing dataset, which also contained NA values in many columns that were not empty in the training data, so I removed them from both datasets.
+The issue at hand was clearly a classification one. I decided to focus exclusively on the numeric parameters and disregard the other values, such as the timestamps, usernames and window numbers.
+In the end, my training set looked like this:
+
+```{r, include = FALSE}
+install.packages("caret")
+install.packages("dplyr")
+install.packages("tidyr")
+install.packages("randomForest")
+install.packages("gbm")
+library(caret)
+library(dplyr)
+library(tidyr)
+library(randomForest)
+library(gbm)
+
+training <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+
+testing <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+
+set.seed(1020)
+
+df_train <- training %>%
+  select(-skewness_yaw_dumbbell, -kurtosis_yaw_dumbbell, -skewness_yaw_arm, -skewness_pitch_arm,-kurtosis_yaw_arm, 
+         -kurtosis_picth_arm ,-kurtosis_picth_belt, -skewness_yaw_belt, -skewness_roll_belt.1, -kurtosis_yaw_belt, 
+         -kurtosis_picth_belt, -kurtosis_yaw_forearm, -min_yaw_forearm, -skewness_yaw_forearm, -amplitude_yaw_forearm, 
+         -skewness_roll_forearm, -kurtosis_picth_forearm, -max_yaw_forearm, -skewness_pitch_forearm, 
+         -skewness_roll_arm, -kurtosis_roll_arm, -amplitude_yaw_dumbbell, -skewness_pitch_dumbbell, 
+         -skewness_roll_dumbbell, -kurtosis_picth_dumbbell, -kurtosis_roll_dumbbell, -amplitude_yaw_belt, 
+         -min_yaw_belt, -skewness_roll_belt, -kurtosis_roll_belt, -max_yaw_belt, -max_yaw_dumbbell, -min_yaw_dumbbell, 
+         -new_window, -X, -user_name, -raw_timestamp_part_1, -raw_timestamp_part_2, -cvtd_timestamp, -num_window)
+
+df_train <- df_train %>%
+  select(roll_belt, pitch_belt, yaw_belt, total_accel_belt, gyros_belt_x, gyros_belt_y, gyros_belt_z, accel_belt_x, accel_belt_y, accel_belt_z,
+         magnet_belt_x, magnet_belt_y, magnet_belt_z, roll_arm, pitch_arm, yaw_arm, total_accel_arm, gyros_arm_x, gyros_arm_y, gyros_arm_z, 
+         accel_arm_x, accel_arm_y, accel_arm_z, magnet_arm_x, magnet_arm_y, magnet_arm_z, roll_dumbbell, pitch_dumbbell,yaw_dumbbell,
+         total_accel_dumbbell, gyros_dumbbell_x, gyros_dumbbell_y, gyros_dumbbell_z, accel_dumbbell_x, accel_dumbbell_y, accel_dumbbell_z, 
+         magnet_dumbbell_x, magnet_dumbbell_y, magnet_dumbbell_z, roll_forearm, pitch_forearm, yaw_forearm, total_accel_forearm,
+         gyros_forearm_x, gyros_forearm_y, gyros_forearm_z, accel_forearm_x, accel_forearm_y, accel_forearm_z, magnet_forearm_x,
+         magnet_forearm_y, magnet_forearm_z, classe)
+
+df_train <- drop_na(df_train)
+
+df_test <- testing %>%
+  select(-skewness_yaw_dumbbell, -kurtosis_yaw_dumbbell, -skewness_yaw_arm, -skewness_pitch_arm,-kurtosis_yaw_arm, 
+         -kurtosis_picth_arm ,-kurtosis_picth_belt, -skewness_yaw_belt, -skewness_roll_belt.1, -kurtosis_yaw_belt, 
+         -kurtosis_picth_belt, -kurtosis_yaw_forearm, -min_yaw_forearm, -skewness_yaw_forearm, -amplitude_yaw_forearm, 
+         -skewness_roll_forearm, -kurtosis_picth_forearm, -max_yaw_forearm, -skewness_pitch_forearm, 
+         -skewness_roll_arm, -kurtosis_roll_arm, -amplitude_yaw_dumbbell, -skewness_pitch_dumbbell, 
+         -skewness_roll_dumbbell, -kurtosis_picth_dumbbell, -kurtosis_roll_dumbbell, -amplitude_yaw_belt, 
+         -min_yaw_belt, -skewness_roll_belt, -kurtosis_roll_belt, -max_yaw_belt, -max_yaw_dumbbell, -min_yaw_dumbbell, 
+         -new_window, -X, -user_name, -raw_timestamp_part_1, -raw_timestamp_part_2, -cvtd_timestamp, -num_window, -problem_id)
+
+df_test <- df_test %>%
+        select(where(~ all(!is.na(.))))
+
+df_train$classe <- as.factor(df_train$classe)
+```
+
+```{r, echo=TRUE}
+str(df_train)
+```
+
+# Pre-processing
+I split the training data into a training and validation data sets in order to be able to assess the performance of the model based on the success of its predictions of the validation set: 
+
+```{r}
+inTrain <- createDataPartition(y=df_train$classe,
+                                          p=0.75, list=FALSE)
+train <- df_train[inTrain,]
+validation <- df_train[-inTrain,]
+```
+I also decided to use PCA during pre-processing to attempt to decrease the number of predictors.
+
+#Model selection
+I compared several models suited for classification issues and compared their Accuracy and Kappa metrics:
+- Random Forest
+- Gradient Boosting
+
+Here are the resulting metrics that compare the models:
+
+```{r, echo=FALSE, include = FALSE}
+gbm <- train(classe ~ ., data = train, method = "gbm", preProcess = "pca")
+rf <- train(classe ~ ., data = train, method = "rf", preProcess = "pca")
+
+results <- list()
+predictions1 <- predict(rf, newdata = validation)
+results$RF <- confusionMatrix(predictions1, validation$classe)
+
+predictions2 <- predict(gbm, newdata = validation)
+results$GBM <- confusionMatrix(predictions2, validation$classe)
+```
+
+```{r, echo = TRUE}
+print(results)
+```
+
+Random Forest performed significantly better in terms of both Accuracy and Kappa. The expected out-of-sample error for that model is equal to 1 - 0.9767 = 0.233.
